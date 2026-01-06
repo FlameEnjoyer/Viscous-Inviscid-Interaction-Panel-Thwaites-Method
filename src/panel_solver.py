@@ -59,7 +59,27 @@ class PanelSolver:
         self.x[0] = self.x[-1] = (self.x[0] + self.x[-1]) / 2.0
         self.y[0] = self.y[-1] = (self.y[0] + self.y[-1]) / 2.0
 
+    def set_geometry(self, x, y):
+        """
+        Set airfoil geometry from external arrays.
+        Used by VII solver to update geometry with displacement thickness.
+        
+        Parameters
+        ----------
+        x : array_like
+            X-coordinates of panel nodes (TE_lower -> LE -> TE_upper)
+        y : array_like
+            Y-coordinates of panel nodes
+        """
+        self.x = np.asarray(x).copy()
+        self.y = np.asarray(y).copy()
+        
+        # Close TE if needed
+        self.x[0] = self.x[-1] = (self.x[0] + self.x[-1]) / 2.0
+        self.y[0] = self.y[-1] = (self.y[0] + self.y[-1]) / 2.0
+
     def solve(self):
+
         # Solve the panel method to get surface velocities and pressure coefficients
         # Panel definition
         x_start = self.x[:-1]
