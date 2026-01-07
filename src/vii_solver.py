@@ -50,7 +50,14 @@ class VIISolver:
             
             delta_star_nodes = (1 - self.relax) * ds_old + self.relax * ds_new
             
-            Cl = 2 * panel.gamma
+            # Calculate Cl from circulation integration
+            # Cl = -2 * Gamma / (U_inf * c), Gamma = integral(Vt ds)
+            dx = np.diff(panel.x)
+            dy = np.diff(panel.y)
+            ds = np.sqrt(dx**2 + dy**2)
+            circulation = np.sum(panel.vt * ds)
+            Cl = -2 * circulation
+            
             Cd = 2 * (bl_up['theta'][-1] + bl_low['theta'][-1])
             residual = np.linalg.norm(delta_star_nodes - ds_old) / (np.linalg.norm(ds_old) + 1e-12)
             
