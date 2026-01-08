@@ -20,32 +20,50 @@ def run_oneway(case):
     panel = PanelSolver(case['naca'], case['alpha'], case['n_panels'])
     panel.solve()
     res = panel.get_surface_properties()
-    
-    # Process Upper Surface
+
     x, y, Ue = res['x'], res['y'], res['Ue']
     split = len(x) // 2
-    xs, ys, us = x[split:], y[split:], Ue[split:]
-    
-    ds = np.sqrt(np.diff(xs)**2 + np.diff(ys)**2)
-    s = np.concatenate(([0], np.cumsum(ds)))
-    s_final = np.concatenate(([0.0], s + np.sqrt(xs[0]**2 + ys[0]**2)))
-    ue_final = np.concatenate(([0.0], np.abs(us)))
-    x_final = np.concatenate(([0.0], xs))
-    
-    if len(ue_final) > 11:
-        ue_final = savgol_filter(ue_final, 9, 3)
-        ue_final[0] = 0.0
-    
+
+    # Process UPPER surface
+    xs_up, ys_up, us_up = x[split:], y[split:], Ue[split:]
+    ds_up = np.sqrt(np.diff(xs_up)**2 + np.diff(ys_up)**2)
+    s_up = np.concatenate(([0], np.cumsum(ds_up)))
+    dist_le_up = np.sqrt(xs_up[0]**2 + ys_up[0]**2)
+    s_final_up = np.concatenate(([0.0], s_up + dist_le_up))
+    ue_final_up = np.concatenate(([0.0], np.abs(us_up)))
+    x_final_up = np.concatenate(([0.0], xs_up))
+
+    if len(ue_final_up) > 11:
+        ue_final_up = savgol_filter(ue_final_up, 9, 3)
+        ue_final_up[0] = 0.0
+
+    # Process LOWER surface
+    xs_low, ys_low, us_low = x[:split][::-1], y[:split][::-1], Ue[:split][::-1]
+    ds_low = np.sqrt(np.diff(xs_low)**2 + np.diff(ys_low)**2)
+    s_low = np.concatenate(([0], np.cumsum(ds_low)))
+    dist_le_low = np.sqrt(xs_low[0]**2 + ys_low[0]**2)
+    s_final_low = np.concatenate(([0.0], s_low + dist_le_low))
+    ue_final_low = np.concatenate(([0.0], np.abs(us_low)))
+
+    if len(ue_final_low) > 11:
+        ue_final_low = savgol_filter(ue_final_low, 9, 3)
+        ue_final_low[0] = 0.0
+
+    # Calculate boundary layer for BOTH surfaces
     thwaites = ThwaitesSolver()
-    bl = thwaites.calculate_properties(s_final, ue_final*case['U_inf'], case['nu'], case['rho'])
-    
-    # Cl integration
-    circulation = np.sum(panel.vt * ds)
-    
+    bl_up = thwaites.calculate_properties(s_final_up, ue_final_up*case['U_inf'], case['nu'], case['rho'])
+    bl_low = thwaites.calculate_properties(s_final_low, ue_final_low*case['U_inf'], case['nu'], case['rho'])
+
+    # Circulation for Cl
+    circulation = np.sum(panel.vt * ds_up)
+
+    # FIXED: Cd now includes BOTH upper and lower trailing edge theta
+    Cd = 2 * (bl_up['theta'][-1] + bl_low['theta'][-1])
+
     return {
-        'x': x_final, 'delta_star': bl['delta_star'], 
-        'theta': bl['theta'], 'Cf': bl['Cf'],
-        'Cl': -2 * circulation, 'Cd': 2 * bl['theta'][-1]
+        'x': x_final_up, 'delta_star': bl_up['delta_star'],
+        'theta': bl_up['theta'], 'Cf': bl_up['Cf'],
+        'Cl': -2 * circulation, 'Cd': Cd
     }
 
 def run_iterative(case):
@@ -56,56 +74,56 @@ def run_iterative(case):
 def plot_compare(ow, it, case):
     os.makedirs('results', exist_ok=True)
     it_up = it['upper']
-    
+
     fig, axs = plt.subplots(2, 2, figsize=(12, 8))
     fig.suptitle(f"NACA {case['naca']} Re={case['re']:.0e} alpha={case['alpha']}")
-    
+
     # Delta Star
     axs[0,0].plot(ow['x'], ow['delta_star']*1000, 'b-', label='One-Way')
     axs[0,0].plot(it_up['x'], it_up['delta_star']*1000, 'r--', label='Iterative')
     axs[0,0].set_ylabel(r'$\delta^*$ [mm]')
     axs[0,0].legend()
     axs[0,0].grid(True, alpha=0.3)
-    
+
     # Theta
     axs[0,1].plot(ow['x'], ow['theta']*1000, 'b-')
     axs[0,1].plot(it_up['x'], it_up['theta']*1000, 'r--')
     axs[0,1].set_ylabel(r'$\theta$ [mm]')
     axs[0,1].grid(True, alpha=0.3)
-    
+
     # Cf
     axs[1,0].plot(ow['x'], ow['Cf'], 'b-')
     axs[1,0].plot(it_up['x'], it_up['Cf'], 'r--')
     axs[1,0].set_ylabel(r'$C_f$')
     axs[1,0].set_ylim(0, 0.01)
     axs[1,0].grid(True, alpha=0.3)
-    
+
     # Shape Factor
     axs[1,1].plot(it_up['x'], it_up['H'], 'r--', label='Iterative H')
     axs[1,1].set_ylabel('H')
     axs[1,1].legend()
     axs[1,1].grid(True, alpha=0.3)
-    
+
     plt.tight_layout()
     plt.savefig('results/comparison.png')
 
 def run_alpha_sweep(naca, re, alphas):
     results_ow = {'alpha': [], 'Cl': [], 'Cd': [], 'L/D': []}
     results_it = {'alpha': [], 'Cl': [], 'Cd': [], 'L/D': []}
-    
+
     print(f"\nStarting Alpha Sweep: {alphas[0]} to {alphas[-1]} degrees...")
     print(f"{'Alpha':<8} {'Cl(It)':<10} {'Cd(It)':<10} {'Conv':<8}")
     print("-" * 40)
 
     base = setup() # base config
-    
+
     for alpha in alphas:
         case = {
             'naca': naca, 'alpha': alpha, 'n_panels': 100,
             'c': base['c'], 'U_inf': base['U_inf'], 'rho': base['rho'],
             'nu': base['U_inf'] * base['c'] / re, 're': re
         }
-        
+
         # One-way
         try:
             ow = run_oneway(case)
@@ -115,12 +133,12 @@ def run_alpha_sweep(naca, re, alphas):
             results_ow['L/D'].append(ow['Cl'] / (ow['Cd'] + 1e-9))
         except:
             pass # Skip failed cases
-            
+
         # Iterative
         try:
             solver = VIISolver(case['naca'], case['alpha'], case['n_panels'], max_iter=200, tol=5e-4, relax=0.1)
             it = solver.solve(case['nu'], case['rho'], case['U_inf'])
-            
+
             if it['converged']:
                 results_it['alpha'].append(alpha)
                 results_it['Cl'].append(it['Cl'])
@@ -135,15 +153,77 @@ def run_alpha_sweep(naca, re, alphas):
 
     return results_ow, results_it
 
+def plot_boundary_layer_properties(result, case):
+    """
+    Plot boundary layer properties along the chord
+    Similar to XFOIL/PyBL comparison plots
+    """
+    os.makedirs('results', exist_ok=True)
+
+    # Extract upper surface boundary layer properties
+    upper = result['upper']
+    x = upper['x']
+    theta = upper['theta']
+    delta_star = upper['delta_star']
+    Cf = upper['Cf']
+    H = upper['H']
+
+    # Create figure with 2x2 subplots
+    fig, axs = plt.subplots(2, 2, figsize=(10, 8))
+    fig.suptitle(f"Boundary Layer Properties: NACA {case['naca']}, α={case['alpha']}°, Re={case['re']:.0e}")
+
+    # Plot 1: Momentum Thickness (theta)
+    axs[0, 0].plot(x, theta, 'k-', linewidth=1.5)
+    axs[0, 0].set_xlabel('x (m)')
+    axs[0, 0].set_ylabel(r'$\theta$ (m)')
+    axs[0, 0].grid(True, alpha=0.3)
+    axs[0, 0].set_xlim([0, 1])
+
+    # Plot 2: Displacement Thickness (delta*)
+    axs[0, 1].plot(x, delta_star, 'k-', linewidth=1.5)
+    axs[0, 1].set_xlabel('x (m)')
+    axs[0, 1].set_ylabel(r'$\delta^*$ (m)')
+    axs[0, 1].grid(True, alpha=0.3)
+    axs[0, 1].set_xlim([0, 1])
+
+    # Plot 3: Skin Friction Coefficient (Cf)
+    axs[1, 0].plot(x, Cf, 'k-', linewidth=1.5)
+    axs[1, 0].set_xlabel('x (m)')
+    axs[1, 0].set_ylabel(r'$c_f$')
+    axs[1, 0].grid(True, alpha=0.3)
+    axs[1, 0].set_xlim([0, 1])
+    axs[1, 0].set_ylim([0, None])
+
+    # Plot 4: Shape Factor (H)
+    axs[1, 1].plot(x, H, 'k-', linewidth=1.5)
+    axs[1, 1].set_xlabel('x (m)')
+    axs[1, 1].set_ylabel('H')
+    axs[1, 1].grid(True, alpha=0.3)
+    axs[1, 1].set_xlim([0, 1])
+    axs[1, 1].set_ylim([2.0, 4.0])
+
+    # Add separation point annotation if exists
+    lam = upper['lambda']
+    sep_indices = np.where(lam <= -0.09)[0]
+    if len(sep_indices) > 0:
+        sep_x = x[sep_indices[0]]
+        for ax in axs.flat:
+            ax.axvline(sep_x, color='r', linestyle='--', linewidth=1, alpha=0.5, label=f'Sep. x={sep_x:.3f}')
+            ax.legend(fontsize=8, loc='best')
+
+    plt.tight_layout()
+    plt.savefig(f"results/bl_properties_alpha{case['alpha']:.0f}.png", dpi=150)
+    print(f"\nBoundary layer properties plot saved to results/bl_properties_alpha{case['alpha']:.0f}.png")
+
 def plot_polars(ow, it, naca, re):
     os.makedirs('results', exist_ok=True)
-    
+
     # Filter for plotting (convert to numpy)
     a_ow = np.array(ow['alpha'])
     cl_ow = np.array(ow['Cl'])
     cd_ow = np.array(ow['Cd'])
     ld_ow = np.array(ow['L/D'])
-    
+
     a_it = np.array(it['alpha'])
     cl_it = np.array(it['Cl'])
     cd_it = np.array(it['Cd'])
@@ -190,17 +270,44 @@ def plot_polars(ow, it, naca, re):
     print("\nPolars saved to results/polars.png")
 
 def main():
-    # Sweep Configuration
+    # Configuration
     naca = '0009'
-    re = 500000  # Back to 500,000
-    alphas = np.linspace(-15, 15, 31) # -15 to 15 step 1
-    
+    re = 500000
+    alphas = np.linspace(-15, 15, 31)
+
     try:
+        # Run alpha sweep
         ow, it = run_alpha_sweep(naca, re, alphas)
         plot_polars(ow, it, naca, re)
-        
+
+        # Run single case at alpha=0 for boundary layer properties plot
+        print("\n" + "="*60)
+        print("Generating boundary layer properties plot for alpha=0 deg")
+        print("="*60)
+
+        base = setup()
+        case_zero = {
+            'naca': naca, 'alpha': 0.0, 'n_panels': 100,
+            'c': base['c'], 'U_inf': base['U_inf'], 'rho': base['rho'],
+            'nu': base['U_inf'] * base['c'] / re, 're': re
+        }
+
+        solver = VIISolver(case_zero['naca'], case_zero['alpha'], case_zero['n_panels'],
+                          max_iter=200, tol=5e-4, relax=0.1)
+        result_zero = solver.solve(case_zero['nu'], case_zero['rho'], case_zero['U_inf'])
+
+        if result_zero['converged']:
+            print(f"Converged in {result_zero['iterations']} iterations")
+            print(f"Cl = {result_zero['Cl']:.6f}")
+            print(f"Cd = {result_zero['Cd']:.6f}")
+            plot_boundary_layer_properties(result_zero, case_zero)
+        else:
+            print("Warning: Did not converge for α=0°")
+
     except Exception as e:
         print(f"An error occurred: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()
