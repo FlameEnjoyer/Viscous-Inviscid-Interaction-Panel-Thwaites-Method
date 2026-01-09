@@ -24,35 +24,56 @@ def run_oneway(case):
     x, y, Ue = res['x'], res['y'], res['Ue']
     split = len(x) // 2
 
-    # Process UPPER surface
+    # Process UPPER surface - smooth then prepend stagnation point
     xs_up, ys_up, us_up = x[split:], y[split:], Ue[split:]
     ds_up = np.sqrt(np.diff(xs_up)**2 + np.diff(ys_up)**2)
     s_up = np.concatenate(([0], np.cumsum(ds_up)))
-    dist_le_up = np.sqrt(xs_up[0]**2 + ys_up[0]**2)
-    s_final_up = np.concatenate(([0.0], s_up + dist_le_up))
-    ue_final_up = np.concatenate(([0.0], np.abs(us_up)))
+    ue_final_up = np.abs(us_up)
+
+    # Triple-pass aggressive smoothing to eliminate LE artifacts
+    if len(ue_final_up) > 21:
+        ue_final_up = savgol_filter(ue_final_up, 21, 3)
+        ue_final_up = savgol_filter(ue_final_up, 17, 3)
+        ue_final_up = savgol_filter(ue_final_up, 13, 3)
+    elif len(ue_final_up) > 15:
+        ue_final_up = savgol_filter(ue_final_up, 15, 3)
+        ue_final_up = savgol_filter(ue_final_up, 11, 3)
+    elif len(ue_final_up) > 11:
+        ue_final_up = savgol_filter(ue_final_up, 11, 3)
+
+    # Prepend stagnation point for Hiemenz solution
+    dist_to_le_up = np.sqrt(xs_up[0]**2 + ys_up[0]**2)
+    s_final_up = np.concatenate(([0.0], s_up + dist_to_le_up))
+    ue_final_up = np.concatenate(([0.0], ue_final_up))
     x_final_up = np.concatenate(([0.0], xs_up))
 
-    if len(ue_final_up) > 11:
-        ue_final_up = savgol_filter(ue_final_up, 9, 3)
-        ue_final_up[0] = 0.0
-
-    # Process LOWER surface
+    # Process LOWER surface - smooth then prepend stagnation point
     xs_low, ys_low, us_low = x[:split][::-1], y[:split][::-1], Ue[:split][::-1]
     ds_low = np.sqrt(np.diff(xs_low)**2 + np.diff(ys_low)**2)
     s_low = np.concatenate(([0], np.cumsum(ds_low)))
-    dist_le_low = np.sqrt(xs_low[0]**2 + ys_low[0]**2)
-    s_final_low = np.concatenate(([0.0], s_low + dist_le_low))
-    ue_final_low = np.concatenate(([0.0], np.abs(us_low)))
+    ue_final_low = np.abs(us_low)
 
-    if len(ue_final_low) > 11:
-        ue_final_low = savgol_filter(ue_final_low, 9, 3)
-        ue_final_low[0] = 0.0
+    # Triple-pass aggressive smoothing to eliminate LE artifacts
+    if len(ue_final_low) > 21:
+        ue_final_low = savgol_filter(ue_final_low, 21, 3)
+        ue_final_low = savgol_filter(ue_final_low, 17, 3)
+        ue_final_low = savgol_filter(ue_final_low, 13, 3)
+    elif len(ue_final_low) > 15:
+        ue_final_low = savgol_filter(ue_final_low, 15, 3)
+        ue_final_low = savgol_filter(ue_final_low, 11, 3)
+    elif len(ue_final_low) > 11:
+        ue_final_low = savgol_filter(ue_final_low, 11, 3)
 
-    # Calculate boundary layer for BOTH surfaces
-    thwaites = ThwaitesSolver()
-    bl_up = thwaites.calculate_properties(s_final_up, ue_final_up*case['U_inf'], case['nu'], case['rho'])
-    bl_low = thwaites.calculate_properties(s_final_low, ue_final_low*case['U_inf'], case['nu'], case['rho'])
+    # Prepend stagnation point for Hiemenz solution
+    dist_to_le_low = np.sqrt(xs_low[0]**2 + ys_low[0]**2)
+    s_final_low = np.concatenate(([0.0], s_low + dist_to_le_low))
+    ue_final_low = np.concatenate(([0.0], ue_final_low))
+    x_final_low = np.concatenate(([0.0], xs_low))
+
+    # Calculate boundary layer for BOTH surfaces with min_sep_x threshold
+    thwaites = ThwaitesSolver(min_sep_x=0.05)  # 5% chord minimum for separation
+    bl_up = thwaites.calculate_properties(s_final_up, ue_final_up*case['U_inf'], case['nu'], case['rho'], x=x_final_up)
+    bl_low = thwaites.calculate_properties(s_final_low, ue_final_low*case['U_inf'], case['nu'], case['rho'], x=x_final_low)
 
     # Circulation for Cl
     circulation = np.sum(panel.vt * ds_up)
@@ -170,7 +191,7 @@ def plot_boundary_layer_properties(result, case):
 
     # Create figure with 2x2 subplots
     fig, axs = plt.subplots(2, 2, figsize=(10, 8))
-    fig.suptitle(f"Boundary Layer Properties: NACA {case['naca']}, α={case['alpha']}°, Re={case['re']:.0e}")
+    fig.suptitle(f"Boundary Layer Properties: NACA {case['naca']}, alpha={case['alpha']}deg, Re={case['re']:.0e}")
 
     # Plot 1: Momentum Thickness (theta)
     axs[0, 0].plot(x, theta, 'k-', linewidth=1.5)
@@ -212,8 +233,144 @@ def plot_boundary_layer_properties(result, case):
             ax.legend(fontsize=8, loc='best')
 
     plt.tight_layout()
-    plt.savefig(f"results/bl_properties_alpha{case['alpha']:.0f}.png", dpi=150)
-    print(f"\nBoundary layer properties plot saved to results/bl_properties_alpha{case['alpha']:.0f}.png")
+    plt.savefig(f"results/bl_properties_alpha{case['alpha']:.0f}_re{case['re']:.0e}.png", dpi=150)
+    print(f"  BL plot: bl_properties_alpha{case['alpha']:.0f}_re{case['re']:.0e}.png")
+
+def plot_multiple_angles(results_dict, naca, re):
+    """
+    Plot BL properties for multiple angles on a single figure
+    results_dict: {'angle': result}
+    """
+    os.makedirs('results', exist_ok=True)
+
+    angles = sorted(results_dict.keys())
+    n_angles = len(angles)
+
+    fig, axs = plt.subplots(n_angles, 4, figsize=(14, 3*n_angles))
+    if n_angles == 1:
+        axs = axs.reshape(1, -1)
+
+    fig.suptitle(f"Boundary Layer Properties: NACA {naca} at Multiple Angles, Re={re:.0e}", fontsize=14)
+
+    for row, alpha in enumerate(angles):
+        result = results_dict[alpha]
+        upper = result['upper']
+        x = upper['x']
+        theta = upper['theta']
+        delta_star = upper['delta_star']
+        Cf = upper['Cf']
+        H = upper['H']
+        lam = upper['lambda']
+
+        # Theta
+        axs[row, 0].plot(x, theta, 'k-', linewidth=1.5)
+        axs[row, 0].set_ylabel(f"alpha={alpha}deg\n" + r"$\theta$ (m)", fontsize=10)
+        axs[row, 0].grid(True, alpha=0.3)
+        axs[row, 0].set_xlim([0, 1])
+
+        # Delta*
+        axs[row, 1].plot(x, delta_star, 'k-', linewidth=1.5)
+        axs[row, 1].set_ylabel(f"alpha={alpha}deg\n" + r"$\delta^*$ (m)", fontsize=10)
+        axs[row, 1].grid(True, alpha=0.3)
+        axs[row, 1].set_xlim([0, 1])
+
+        # Cf
+        axs[row, 2].plot(x, Cf, 'k-', linewidth=1.5)
+        axs[row, 2].set_ylabel(f"alpha={alpha}deg\n" + r"$c_f$", fontsize=10)
+        axs[row, 2].grid(True, alpha=0.3)
+        axs[row, 2].set_xlim([0, 1])
+        axs[row, 2].set_ylim([0, None])
+
+        # H
+        axs[row, 3].plot(x, H, 'k-', linewidth=1.5)
+        axs[row, 3].set_ylabel(f"alpha={alpha}deg\n" + "H", fontsize=10)
+        axs[row, 3].grid(True, alpha=0.3)
+        axs[row, 3].set_xlim([0, 1])
+        axs[row, 3].set_ylim([2.0, 4.0])
+
+        # Add separation line
+        sep_indices = np.where(lam <= -0.09)[0]
+        if len(sep_indices) > 0:
+            sep_x = x[sep_indices[0]]
+            for col in range(4):
+                axs[row, col].axvline(sep_x, color='r', linestyle='--', linewidth=1, alpha=0.5)
+
+        # x labels only on bottom
+        if row == n_angles - 1:
+            for col in range(4):
+                axs[row, col].set_xlabel('x (m)')
+
+    plt.tight_layout()
+    plt.savefig(f"results/bl_multi_angle_re{re:.0e}.png", dpi=150)
+    print(f"  Multi-angle plot: bl_multi_angle_re{re:.0e}.png")
+
+def plot_reynolds_comparison(results_dict, naca, alpha):
+    """
+    Plot BL properties for multiple Reynolds numbers
+    results_dict: {'reynolds': result}
+    """
+    os.makedirs('results', exist_ok=True)
+
+    re_values = sorted(results_dict.keys())
+    n_re = len(re_values)
+
+    fig, axs = plt.subplots(n_re, 4, figsize=(14, 3*n_re))
+    if n_re == 1:
+        axs = axs.reshape(1, -1)
+
+    fig.suptitle(f"Boundary Layer Properties: NACA {naca} at alpha={alpha}deg, Multiple Reynolds", fontsize=14)
+
+    for row, re in enumerate(re_values):
+        result = results_dict[re]
+        upper = result['upper']
+        x = upper['x']
+        theta = upper['theta']
+        delta_star = upper['delta_star']
+        Cf = upper['Cf']
+        H = upper['H']
+        lam = upper['lambda']
+
+        # Theta
+        axs[row, 0].plot(x, theta, 'k-', linewidth=1.5)
+        axs[row, 0].set_ylabel(f"Re={re:.0e}\n" + r"$\theta$ (m)", fontsize=10)
+        axs[row, 0].grid(True, alpha=0.3)
+        axs[row, 0].set_xlim([0, 1])
+
+        # Delta*
+        axs[row, 1].plot(x, delta_star, 'k-', linewidth=1.5)
+        axs[row, 1].set_ylabel(f"Re={re:.0e}\n" + r"$\delta^*$ (m)", fontsize=10)
+        axs[row, 1].grid(True, alpha=0.3)
+        axs[row, 1].set_xlim([0, 1])
+
+        # Cf
+        axs[row, 2].plot(x, Cf, 'k-', linewidth=1.5)
+        axs[row, 2].set_ylabel(f"Re={re:.0e}\n" + r"$c_f$", fontsize=10)
+        axs[row, 2].grid(True, alpha=0.3)
+        axs[row, 2].set_xlim([0, 1])
+        axs[row, 2].set_ylim([0, None])
+
+        # H
+        axs[row, 3].plot(x, H, 'k-', linewidth=1.5)
+        axs[row, 3].set_ylabel(f"Re={re:.0e}\n" + "H", fontsize=10)
+        axs[row, 3].grid(True, alpha=0.3)
+        axs[row, 3].set_xlim([0, 1])
+        axs[row, 3].set_ylim([2.0, 4.0])
+
+        # Add separation line
+        sep_indices = np.where(lam <= -0.09)[0]
+        if len(sep_indices) > 0:
+            sep_x = x[sep_indices[0]]
+            for col in range(4):
+                axs[row, col].axvline(sep_x, color='r', linestyle='--', linewidth=1, alpha=0.5)
+
+        # x labels only on bottom
+        if row == n_re - 1:
+            for col in range(4):
+                axs[row, col].set_xlabel('x (m)')
+
+    plt.tight_layout()
+    plt.savefig(f"results/bl_reynolds_comparison_alpha{alpha:.0f}.png", dpi=150)
+    print(f"  Reynolds comparison plot: bl_reynolds_comparison_alpha{alpha:.0f}.png")
 
 def plot_polars(ow, it, naca, re):
     os.makedirs('results', exist_ok=True)
@@ -272,37 +429,132 @@ def plot_polars(ow, it, naca, re):
 def main():
     # Configuration
     naca = '0009'
-    re = 500000
+    base_re = 500000
+    base = setup()
+
     alphas = np.linspace(-15, 15, 31)
 
     try:
-        # Run alpha sweep
-        ow, it = run_alpha_sweep(naca, re, alphas)
-        plot_polars(ow, it, naca, re)
+        # Run alpha sweep at base Re
+        print("\n" + "="*80)
+        print("AERODYNAMIC SWEEP: NACA 0009, Re=500000")
+        print("="*80)
+        ow, it = run_alpha_sweep(naca, base_re, alphas)
+        plot_polars(ow, it, naca, base_re)
 
-        # Run single case at alpha=0 for boundary layer properties plot
-        print("\n" + "="*60)
-        print("Generating boundary layer properties plot for alpha=0 deg")
-        print("="*60)
+        # =====================================================================
+        # PART 1: BOUNDARY LAYER PROPERTIES AT DIFFERENT ANGLES (Re=500k)
+        # =====================================================================
+        print("\n" + "="*80)
+        print("PART 1: Boundary Layer Properties at Multiple Angles (Re=500,000)")
+        print("="*80)
 
-        base = setup()
-        case_zero = {
-            'naca': naca, 'alpha': 0.0, 'n_panels': 100,
-            'c': base['c'], 'U_inf': base['U_inf'], 'rho': base['rho'],
-            'nu': base['U_inf'] * base['c'] / re, 're': re
-        }
+        test_angles = [0.0, 5.0, 10.0]
+        angle_results = {}
 
-        solver = VIISolver(case_zero['naca'], case_zero['alpha'], case_zero['n_panels'],
-                          max_iter=200, tol=5e-4, relax=0.1)
-        result_zero = solver.solve(case_zero['nu'], case_zero['rho'], case_zero['U_inf'])
+        for alpha in test_angles:
+            print(f"\nProcessing alpha = {alpha}deg...")
+            case = {
+                'naca': naca, 'alpha': alpha, 'n_panels': 100,
+                'c': base['c'], 'U_inf': base['U_inf'], 'rho': base['rho'],
+                'nu': base['U_inf'] * base['c'] / base_re, 're': base_re
+            }
 
-        if result_zero['converged']:
-            print(f"Converged in {result_zero['iterations']} iterations")
-            print(f"Cl = {result_zero['Cl']:.6f}")
-            print(f"Cd = {result_zero['Cd']:.6f}")
-            plot_boundary_layer_properties(result_zero, case_zero)
-        else:
-            print("Warning: Did not converge for α=0°")
+            solver = VIISolver(case['naca'], case['alpha'], case['n_panels'],
+                              max_iter=200, tol=5e-4, relax=0.1)
+            result = solver.solve(case['nu'], case['rho'], case['U_inf'])
+
+            if result['converged']:
+                print(f"  Converged in {result['iterations']} iterations")
+                print(f"  Cl = {result['Cl']:.6f}, Cd = {result['Cd']:.6f}")
+                plot_boundary_layer_properties(result, case)
+                angle_results[alpha] = result
+            else:
+                print(f"  Warning: Did not converge")
+
+        # Multi-angle comparison
+        if len(angle_results) > 0:
+            print("\nGenerating multi-angle comparison plot...")
+            plot_multiple_angles(angle_results, naca, base_re)
+
+        # =====================================================================
+        # PART 2: REYNOLDS NUMBER COMPARISON AT DIFFERENT Re (alpha=5 deg)
+        # =====================================================================
+        print("\n" + "="*80)
+        print("PART 2: Reynolds Number Comparison at alpha=5 deg")
+        print("="*80)
+
+        test_re = [500000, 1000000, 2000000]
+        test_alpha = 5.0
+        re_results = {}
+
+        for re in test_re:
+            print(f"\nProcessing Re = {re:.0e}...")
+            case = {
+                'naca': naca, 'alpha': test_alpha, 'n_panels': 100,
+                'c': base['c'], 'U_inf': base['U_inf'], 'rho': base['rho'],
+                'nu': base['U_inf'] * base['c'] / re, 're': re
+            }
+
+            solver = VIISolver(case['naca'], case['alpha'], case['n_panels'],
+                              max_iter=200, tol=5e-4, relax=0.1)
+            result = solver.solve(case['nu'], case['rho'], case['U_inf'])
+
+            if result['converged']:
+                print(f"  Converged in {result['iterations']} iterations")
+                print(f"  Cl = {result['Cl']:.6f}, Cd = {result['Cd']:.6f}")
+                plot_boundary_layer_properties(result, case)
+                re_results[re] = result
+            else:
+                print(f"  Warning: Did not converge")
+
+        # Reynolds comparison
+        if len(re_results) > 0:
+            print(f"\nGenerating Reynolds number comparison plot for alpha={test_alpha}deg...")
+            plot_reynolds_comparison(re_results, naca, test_alpha)
+
+        # =====================================================================
+        # PART 3: COMPREHENSIVE MULTI-ANGLE COMPARISON AT DIFFERENT Re
+        # =====================================================================
+        print("\n" + "="*80)
+        print("PART 3: Comprehensive Comparison at Multiple Angles & Reynolds Numbers")
+        print("="*80)
+
+        comprehensive_results = {}
+        for re in test_re:
+            print(f"\nRe = {re:.0e}:")
+            comprehensive_results[re] = {}
+            for alpha in test_angles:
+                print(f"  Processing alpha = {alpha}deg...")
+                case = {
+                    'naca': naca, 'alpha': alpha, 'n_panels': 100,
+                    'c': base['c'], 'U_inf': base['U_inf'], 'rho': base['rho'],
+                    'nu': base['U_inf'] * base['c'] / re, 're': re
+                }
+
+                solver = VIISolver(case['naca'], case['alpha'], case['n_panels'],
+                                  max_iter=200, tol=5e-4, relax=0.1)
+                result = solver.solve(case['nu'], case['rho'], case['U_inf'])
+
+                if result['converged']:
+                    print(f"    -> Cl={result['Cl']:.4f}, Cd={result['Cd']:.5f}")
+                    comprehensive_results[re][alpha] = result
+                else:
+                    print(f"    -> Did not converge")
+
+            # Generate multi-angle plot for each Re
+            if len(comprehensive_results[re]) > 0:
+                print(f"  Generating multi-angle plot for Re={re:.0e}...")
+                plot_multiple_angles(comprehensive_results[re], naca, re)
+
+        print("\n" + "="*80)
+        print("ALL PLOTS GENERATED SUCCESSFULLY!")
+        print("="*80)
+        print("\nGenerated files in 'results/' directory:")
+        print("  - polars.png: Aerodynamic polars for Re=500k")
+        print("  - bl_properties_alpha*.png: Individual angle/Re combinations")
+        print("  - bl_multi_angle_re*.png: Multi-angle comparisons")
+        print("  - bl_reynolds_comparison_alpha*.png: Reynolds comparisons")
 
     except Exception as e:
         print(f"An error occurred: {e}")
