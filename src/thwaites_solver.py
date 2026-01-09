@@ -80,11 +80,11 @@ class ThwaitesSolver:
         mask_neg = l_att < 0
 
         # Positive lambda correlations (favorable pressure gradient)
-        S_lam[:sep_idx][mask_pos] = (l_att[mask_pos] + 0.09)**0.62
+        S_lam[:sep_idx][mask_pos] = 0.22 + 1.57*l_att[mask_pos] - 1.8*l_att[mask_pos]**2
         H_lam[:sep_idx][mask_pos] = 2.61 - 3.75*l_att[mask_pos] + 5.24*l_att[mask_pos]**2
 
         # Negative lambda correlations (adverse pressure gradient, valid for lambda >= -0.09)
-        S_lam[:sep_idx][mask_neg] = (l_att[mask_neg] + 0.09)**0.62
+        S_lam[:sep_idx][mask_neg] = 0.22 + 1.402*l_att[mask_neg] - 0.018/(0.10 + l_att[mask_neg])
         H_lam[:sep_idx][mask_neg] = 2.088 + 0.0731 / (l_att[mask_neg] + 0.14)
 
         # Post-separation handling
