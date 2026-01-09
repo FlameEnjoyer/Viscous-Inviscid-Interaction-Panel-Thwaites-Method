@@ -102,7 +102,7 @@ class PanelSolver:
                 Bn[i, j] = -u_vortex * sin_theta[i] + v_vortex * cos_theta[i]
                 Bt[i, j] = u_vortex * cos_theta[i] + v_vortex * sin_theta[i]
 
-            An[i, i] = 0.5
+            An[i, i] = -0.5
             At[i, i] = 0.0
             Bn[i, i] = 0.0
             Bt[i, i] = 0.5
@@ -131,6 +131,65 @@ class PanelSolver:
         self.vt = V_inf_t + Vt_induced_source + Vt_induced_vortex
         self.cp = 1.0 - (self.vt)**2
 
+    def calculate_moment_coefficient(self, x_ref=0.25):
+        """
+        Calculate Moment Coefficient about a reference point x_ref (y=0 assumed).
+        Positive Moment is nose-up.
+        """
+        xc = (self.x[:-1] + self.x[1:]) / 2
+        yc = (self.y[:-1] + self.y[1:]) / 2
+
+        dx = np.diff(self.x)
+        dy = np.diff(self.y)
+
+        # Force components (Normal to panel)
+        # Pressure P acts normal to surface INWARDS.
+        # F_p vector = -Cp * length * n
+        # Vector (dx, dy) is tangent.
+        # Outward normal is (dy, -dx) given CCW order?
+        # Let's check rotation again.
+        # If CCW: dy is y_next - y_prev.
+        # Normal (dy, -dx).
+        # Pressure Force = -Cp * (dy, -dx) = (-Cp*dy, Cp*dx).
+        # Fx = -Cp * dy
+        # Fy = Cp * dx
+
+        # Let's verify lift direction.
+        # Lift is roughly Fy (for alpha=0).
+        # If Cp negative on upper (suction), and dx > 0 (LE->TE).
+        # Fy = (-ve) * (+ve) = -ve. Down force? That's wrong.
+        # Points trace TE -> Lower -> LE -> Upper -> TE.
+        # Upper surface: x increases. dx > 0.
+        # Lower surface: x decreases. dx < 0.
+
+        # Upper Surface (Suction, Cp < 0).
+        # Want positive Lift (Up).
+        # Normal should point Up-ish.
+        # Tangent (dx, dy). dx > 0.
+        # Normal (-dy, dx). dx > 0 -> Up. Correct.
+        # So Normal is (-dy, dx).
+        # Force = -Cp * l * n = -Cp * (-dy, dx) = (Cp*dy, -Cp*dx).
+
+        # Check Lower Surface (Pressure, Cp > 0 or < 0 but > Suction).
+        # x decreases. dx < 0.
+        # Normal (-dy, dx). dx < 0 -> Down. Correct.
+        # Force = -Cp * n = (Cp*dy, -Cp*dx).
+
+        # So Fx = Cp * dy
+        #    Fy = -Cp * dx
+
+        Fx = self.cp * dy
+        Fy = -self.cp * dx
+
+        # Moment M = rx * Fy - ry * Fx
+        rx = xc - x_ref
+        ry = yc   # Moment about (x_ref, 0)
+
+        M = rx * Fy - ry * Fx
+        Cm = np.sum(M)
+
+        return Cm
+
     def get_surface_properties(self):
         xc = (self.x[:-1] + self.x[1:]) / 2
         yc = (self.y[:-1] + self.y[1:]) / 2
@@ -145,7 +204,22 @@ class PanelSolver:
         s_le = s_mid[le_idx]
         s_centered = s_mid - s_le
 
+        # Calculate Cm (quarter chord) and CP
+        Cm_c4 = self.calculate_moment_coefficient(x_ref=0.25)
+
+        # Calculate Cl for Cp_loc
+        Fx_tot = np.sum(self.cp * dy)
+        Fy_tot = np.sum(-self.cp * dx)
+        Cl = Fy_tot * np.cos(self.alpha) - Fx_tot * np.sin(self.alpha)
+
+        # Center of Pressure
+        if abs(Cl) < 1e-6:
+            x_cp = 0.25
+        else:
+            x_cp = 0.25 - Cm_c4 / Cl
+
         return {
             'x': xc, 'y': yc, 's': s_centered,
-            'Ue': self.vt, 'Cp': self.cp
+            'Ue': self.vt, 'Cp': self.cp,
+            'Cm': Cm_c4, 'x_cp': x_cp
         }

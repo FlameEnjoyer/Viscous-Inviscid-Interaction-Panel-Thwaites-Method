@@ -35,10 +35,11 @@ class VIISolver:
             res = panel.get_surface_properties()
 
             upper, lower = self._extract_surf(res, 'upper'), self._extract_surf(res, 'lower')
-            thwaites = ThwaitesSolver()
+            thwaites = ThwaitesSolver(min_sep_x=0.05)  # 5% chord minimum for separation
 
-            bl_up = thwaites.calculate_properties(upper['s'], upper['Ue']*U_inf, nu, rho)
-            bl_low = thwaites.calculate_properties(lower['s'], lower['Ue']*U_inf, nu, rho)
+            # Pass x-coordinates to enable separation threshold check
+            bl_up = thwaites.calculate_properties(upper['s'], upper['Ue']*U_inf, nu, rho, x=upper['x'])
+            bl_low = thwaites.calculate_properties(lower['s'], lower['Ue']*U_inf, nu, rho, x=lower['x'])
 
             ds_new = self._map_ds_to_nodes(upper, lower, bl_up['delta_star'], bl_low['delta_star'])
 
@@ -65,6 +66,10 @@ class VIISolver:
             ds = np.sqrt(dx**2 + dy**2)
             circulation = np.sum(panel.vt * ds)
             Cl = -2 * circulation
+
+            # Extract Cm and x_cp from the latest inviscid solution
+            Cm = res['Cm']
+            x_cp = res['x_cp']
 
             # IMPROVED: Smooth theta before computing Cd
             theta_up_smooth = bl_up['theta'].copy()
@@ -94,7 +99,7 @@ class VIISolver:
 
         self.results = {
             'converged': converged, 'iterations': iteration,
-            'Cl': Cl, 'Cd': Cd,
+            'Cl': Cl, 'Cd': Cd, 'Cm': Cm, 'x_cp': x_cp,
             'upper': {**upper, **bl_up},
             'lower': {**lower, **bl_low},
             'history': history,
@@ -119,17 +124,28 @@ class VIISolver:
             idx = np.arange(self.n_half, -1, -1)
             xs, ys, us = x[:split][::-1], y[:split][::-1], Ue[:split][::-1]
 
+        # Calculate arc length
         ds = np.sqrt(np.diff(xs)**2 + np.diff(ys)**2)
         s = np.concatenate(([0], np.cumsum(ds)))
-        dist_le = np.sqrt(xs[0]**2 + ys[0]**2)
 
-        s_final = np.concatenate(([0.0], s + dist_le))
-        ue_final = np.concatenate(([0.0], np.abs(us)))
+        ue_final = np.abs(us)
+
+        # Apply very aggressive smoothing to eliminate LE artifacts
+        if len(ue_final) > 21:
+            ue_final = savgol_filter(ue_final, window_length=21, polyorder=3)
+            ue_final = savgol_filter(ue_final, window_length=17, polyorder=3)
+            ue_final = savgol_filter(ue_final, window_length=13, polyorder=3)
+        elif len(ue_final) > 15:
+            ue_final = savgol_filter(ue_final, window_length=15, polyorder=3)
+            ue_final = savgol_filter(ue_final, window_length=11, polyorder=3)
+        elif len(ue_final) > 11:
+            ue_final = savgol_filter(ue_final, 11, 3)
+
+        # Prepend stagnation point to trigger Hiemenz solution in Thwaites
+        dist_to_le = np.sqrt(xs[0]**2 + ys[0]**2)
+        s_final = np.concatenate(([0.0], s + dist_to_le))
+        ue_final = np.concatenate(([0.0], ue_final))
         x_final = np.concatenate(([0.0], xs))
-
-        if len(ue_final) > 11:
-            ue_final = savgol_filter(ue_final, 9, 3)
-            ue_final[0] = 0.0
 
         return {'x': x_final, 's': s_final, 'Ue': np.abs(ue_final), 'indices': idx}
 
