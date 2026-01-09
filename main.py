@@ -75,16 +75,23 @@ def run_oneway(case):
     bl_up = thwaites.calculate_properties(s_final_up, ue_final_up*case['U_inf'], case['nu'], case['rho'], x=x_final_up)
     bl_low = thwaites.calculate_properties(s_final_low, ue_final_low*case['U_inf'], case['nu'], case['rho'], x=x_final_low)
 
-    # Circulation for Cl
-    circulation = np.sum(panel.vt * ds_up)
+    # FIXED: Calculate Cl from pressure integration (more accurate)
+    # Pressure force acts on inward normal: F = -Cp * (dy, -dx)
+    dx_all = np.diff(panel.x)
+    dy_all = np.diff(panel.y)
+    alpha_rad = np.radians(case['alpha'])
 
-    # FIXED: Cd now includes BOTH upper and lower trailing edge theta
+    Fx = np.sum(-panel.cp * dy_all)
+    Fy = np.sum(panel.cp * dx_all)
+    Cl = Fy * np.cos(alpha_rad) - Fx * np.sin(alpha_rad)
+
+    # Cd includes BOTH upper and lower trailing edge theta
     Cd = 2 * (bl_up['theta'][-1] + bl_low['theta'][-1])
 
     return {
         'x': x_final_up, 'delta_star': bl_up['delta_star'],
         'theta': bl_up['theta'], 'Cf': bl_up['Cf'],
-        'Cl': -2 * circulation, 'Cd': Cd
+        'Cl': Cl, 'Cd': Cd
     }
 
 def run_iterative(case):

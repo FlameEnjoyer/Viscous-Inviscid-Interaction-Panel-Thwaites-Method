@@ -106,18 +106,21 @@ def run_vii_sweep(alphas):
     
     for alpha in alphas:
         print(f"  Calculating Alpha = {alpha:.1f}...", end="\r")
-        solver = VIISolver(NACA, alpha, N_PANELS, max_iter=20, tol=1e-4, relax=0.1)
+        # FIXED: Increased max_iter from 20 to 200, tightened tolerance
+        solver = VIISolver(NACA, alpha, N_PANELS, max_iter=200, tol=5e-4, relax=0.1)
         res = solver.solve(nu, rho, U_inf)
-        
+
         if res['converged']:
             results['alpha'].append(alpha)
             results['Cl'].append(res['Cl'])
             results['Cd'].append(res['Cd'])
             results['Cm'].append(res['Cm'])
             results['x_cp'].append(res['x_cp'])
+            print(f"  Alpha = {alpha:.1f}: Converged in {res['iterations']} iters - Cl={res['Cl']:.4f}, Cd={res['Cd']:.5f}")
         else:
-            # If not converged, maybe append None or last value? 
-            # For plotting, better to skip or interpolate. 
+            print(f"  Alpha = {alpha:.1f}: FAILED TO CONVERGE after {res['iterations']} iterations")
+            # If not converged, maybe append None or last value?
+            # For plotting, better to skip or interpolate.
             # Appending valid data only for now.
             pass
             
@@ -130,9 +133,17 @@ def run_vii_bl_zero():
     U_inf = 10.0
     nu = U_inf * c / RE
     rho = 1.225
-    
-    solver = VIISolver(NACA, 0.0, N_PANELS, max_iter=50) # More iter for precision
+
+    # FIXED: Increased max_iter and set proper tolerance for precision
+    solver = VIISolver(NACA, 0.0, N_PANELS, max_iter=200, tol=5e-4, relax=0.1)
     res = solver.solve(nu, rho, U_inf)
+
+    if res['converged']:
+        print(f"  Converged in {res['iterations']} iterations")
+        print(f"  Cl = {res['Cl']:.6f}, Cd = {res['Cd']:.6f}")
+    else:
+        print(f"  WARNING: Did not converge after {res['iterations']} iterations!")
+
     return res
 
 def plot_polars(vii, java):

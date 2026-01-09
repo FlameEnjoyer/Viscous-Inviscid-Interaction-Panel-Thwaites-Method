@@ -60,12 +60,18 @@ class VIISolver:
 
             delta_star_nodes = (1 - self.relax) * ds_old + self.relax * ds_new
 
-            # Calculate Cl from circulation integration
+            # FIXED: Calculate Cl from pressure integration (more accurate than circulation)
             dx = np.diff(panel.x)
             dy = np.diff(panel.y)
-            ds = np.sqrt(dx**2 + dy**2)
-            circulation = np.sum(panel.vt * ds)
-            Cl = -2 * circulation
+
+            # Force components from pressure distribution
+            # Pressure force acts on inward normal: F = -Cp * (dy, -dx)
+            alpha_rad = np.radians(self.alpha_deg)
+            Fx = np.sum(-panel.cp * dy)
+            Fy = np.sum(panel.cp * dx)
+
+            # Lift coefficient (rotate forces to wind axes)
+            Cl = Fy * np.cos(alpha_rad) - Fx * np.sin(alpha_rad)
 
             # Extract Cm and x_cp from the latest inviscid solution
             Cm = res['Cm']
