@@ -9,7 +9,7 @@ This repository contains a Python implementation of a Viscous-Inviscid Interacti
 - **Viscous Solver**: Implements Thwaites' method to solve integral boundary layer equations.
 - **VII Coupling**: Iteratively couples the viscous and inviscid solutions using an under-relaxation scheme on the displacement thickness.
 - **Aerodynamic Coefficients**: Calculates $C_l$, $C_d$, and $C_p$.
-- **Validation**: Includes plotting utilities to compare results against JavaFoil or XFOIL data.
+- **Validation**: Includes plotting utilities to compare results against JavaFoil data.
 
 ## Installation
 
